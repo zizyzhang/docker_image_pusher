@@ -3,6 +3,7 @@
 --platform linux/arm64 mongodb/mongodb-community-server:7.0.15-ubi9
 
 jc21/nginx-proxy-manager:latest
+cym1102/nginxwebui:latest
 #nginx
 #支持私库
 #k8s.gcr.io/kube-state-metrics/kube-state-metrics:v2.0.0
