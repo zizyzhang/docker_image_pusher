@@ -1,4 +1,5 @@
 #mongodb/mongodb-community-server:latest
+registry.rocket.chat/rocketchat/rocket.chat:latest
 --platform linux/arm64/v8 arm64v8/node:23
 --platform linux/arm64 mongodb/mongodb-community-server:7.0.15-ubi9
 
