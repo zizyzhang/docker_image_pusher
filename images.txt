@@ -1,5 +1,6 @@
 #mongodb/mongodb-community-server:latest
 #registry.rocket.chat/rocketchat/rocket.chat:latest
+ghcr.io/ferretdb/ferretdb:2.4.0
 mattermost/mattermost-team-edition:latest
 postgres:13-alpine
 --platform linux/arm64/v8 arm64v8/node:23
