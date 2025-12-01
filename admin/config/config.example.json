@@ -1,0 +1,20 @@
+{
+  "github": {
+    "username": "zizyzhang",
+    "repo": "docker_image_pusher",
+    "personalAccessToken": "ghp_xxxxxxxxxxxx",
+    "branch": "main"
+  },
+  "aliyun": {
+    "accessKeyId": "LTAI5txxxxxxxxxx",
+    "accessKeySecret": "xxxxxxxxxxxxxxxxxx",
+    "regionId": "cn-qingdao",
+    "instanceId": "crpi-a6eb7y7vnd1palvq",
+    "namespace": "weiwentech",
+    "registryDomain": "crpi-a6eb7y7vnd1palvq.cn-qingdao.personal.cr.aliyuncs.com"
+  },
+  "server": {
+    "port": 3100,
+    "repoLocalPath": "/var/docker-mirror/repo"
+  }
+}

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker 镜像加速服务</title>
+    <script src="https://cdn.shushubuyue.net/ajax/libs/tailwindcss/3.4.16/tailwind.min.js"></script>
+    <script src="https://cdn.shushubuyue.net/ajax/libs/vue/3.5.11/vue.global.js"></script>
+    <script src="https://cdn.shushubuyue.net/ajax/libs/axios/1.7.2/axios.min.js"></script>
+    <style>
+        [v-cloak] { display: none; }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="app" v-cloak>
+        <div class="max-w-6xl mx-auto px-4 py-8">
+            <!-- Header -->
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-800 mb-2">Docker 镜像加速服务</h1>
+                <p class="text-gray-600">将 Docker Hub 镜像同步到阿里云，加速国内访问</p>
+            </div>
+
+            <!-- Submit Form -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">提交镜像</h2>
+                <form @submit.prevent="submitImage" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Docker Hub 镜像地址</label>
+                        <input
+                            v-model="imageInput"
+                            type="text"
+                            placeholder="例如: nginx:latest 或 library/redis:7.0"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            :disabled="isSubmitting"
+                        >
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">平台架构 (可选)</label>
+                        <select
+                            v-model="platform"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            :disabled="isSubmitting"
+                        >
+                            <option value="">自动 (默认)</option>
+                            <option value="linux/amd64">linux/amd64</option>
+                            <option value="linux/arm64">linux/arm64</option>
+                            <option value="linux/arm/v7">linux/arm/v7</option>
+                        </select>
+                    </div>
+                    <button
+                        type="submit"
+                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
+                        :disabled="isSubmitting || !imageInput.trim()"
+                    >
+                        <svg v-if="isSubmitting" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        {{ isSubmitting ? '提交中...' : '提交镜像' }}
+                    </button>
+                </form>
+
+                <!-- Submit Result -->
+                <div v-if="submitResult" class="mt-4 p-4 rounded-lg" :class="submitResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                    <p class="font-medium">{{ submitResult.message }}</p>
+                    <p v-if="submitResult.commitSha" class="text-sm mt-1">Commit: {{ submitResult.commitSha }}</p>
+                </div>
+            </div>
+
+            <!-- Workflow Status -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">构建状态</h2>
+                    <button @click="fetchWorkflowStatus" class="text-blue-600 hover:text-blue-800 text-sm">
+                        刷新
+                    </button>
+                </div>
+                <div v-if="workflowLoading" class="text-center py-4 text-gray-500">
+                    加载中...
+                </div>
+                <div v-else-if="workflows.length === 0" class="text-center py-4 text-gray-500">
+                    暂无构建记录
+                </div>
+                <div v-else class="space-y-3">
+                    <div v-for="run in workflows" :key="run.id" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div class="flex items-center space-x-3">
+                            <span class="w-3 h-3 rounded-full" :class="getStatusColor(run.status, run.conclusion)"></span>
+                            <div>
+                                <p class="font-medium text-gray-800">{{ run.name }}</p>
+                                <p class="text-sm text-gray-500">{{ formatTime(run.createdAt) }}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm px-2 py-1 rounded" :class="getStatusBadgeClass(run.status, run.conclusion)">
+                                {{ getStatusText(run.status, run.conclusion) }}
+                            </span>
+                            <a :href="run.htmlUrl" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm">
+                                查看详情
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mirrored Images -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">已镜像列表</h2>
+                    <button @click="fetchImages" class="text-blue-600 hover:text-blue-800 text-sm">
+                        刷新
+                    </button>
+                </div>
+
+                <!-- API Not Available Notice -->
+                <div v-if="imagesError" class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                    <p class="text-yellow-800 font-medium">{{ imagesError.message }}</p>
+                    <div class="mt-3 space-y-2">
+                        <a v-if="imagesError.consoleUrl" :href="imagesError.consoleUrl" target="_blank" class="inline-block text-blue-600 hover:text-blue-800 text-sm">
+                            前往阿里云控制台查看 →
+                        </a>
+                        <div class="text-sm text-gray-600">
+                            <p>镜像仓库地址: <code class="bg-gray-100 px-1 rounded">{{ imagesError.registryDomain }}/{{ imagesError.namespace }}/</code></p>
+                            <p class="mt-1">拉取命令格式: <code class="bg-gray-100 px-1 rounded">docker pull {{ imagesError.registryDomain }}/{{ imagesError.namespace }}/镜像名:标签</code></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search (only show if API available) -->
+                <div v-if="!imagesError" class="mb-4">
+                    <input
+                        v-model="searchQuery"
+                        type="text"
+                        placeholder="搜索镜像..."
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                </div>
+
+                <div v-if="imagesLoading" class="text-center py-8 text-gray-500">
+                    加载中...
+                </div>
+                <div v-else-if="!imagesError && filteredImages.length === 0" class="text-center py-8 text-gray-500">
+                    {{ searchQuery ? '未找到匹配的镜像' : '暂无已镜像的镜像' }}
+                </div>
+                <div v-else-if="!imagesError" class="space-y-4">
+                    <div v-for="image in filteredImages" :key="image.repoId" class="border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="bg-gray-50 px-4 py-3 flex items-center justify-between cursor-pointer" @click="toggleExpand(image.repoId)">
+                            <div class="flex items-center space-x-2">
+                                <svg class="w-5 h-5 text-gray-500 transition-transform" :class="{ 'rotate-90': expandedRepos.includes(image.repoId) }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                </svg>
+                                <span class="font-medium text-gray-800">{{ image.repoName }}</span>
+                                <span class="text-sm text-gray-500">({{ image.tags.length }} 个标签)</span>
+                            </div>
+                        </div>
+                        <div v-show="expandedRepos.includes(image.repoId)" class="divide-y divide-gray-100">
+                            <div v-for="tag in image.tags" :key="tag.tag" class="px-4 py-3 hover:bg-gray-50">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <span class="text-blue-600 font-mono">:{{ tag.tag }}</span>
+                                        <span class="text-sm text-gray-500 ml-2">{{ formatSize(tag.imageSize) }}</span>
+                                        <span class="text-sm text-gray-400 ml-2">{{ formatTime(tag.createTime) }}</span>
+                                    </div>
+                                    <button
+                                        @click="copyCommand(tag.pullCommand)"
+                                        class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded transition"
+                                    >
+                                        复制拉取命令
+                                    </button>
+                                </div>
+                                <p class="text-sm text-gray-500 font-mono mt-1 break-all">{{ tag.pullCommand }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Toast -->
+            <transition name="fade">
+                <div v-if="toast" class="fixed bottom-4 right-4 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg">
+                    {{ toast }}
+                </div>
+            </transition>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                // Form state
+                const imageInput = ref('');
+                const platform = ref('');
+                const isSubmitting = ref(false);
+                const submitResult = ref(null);
+
+                // Workflow state
+                const workflows = ref([]);
+                const workflowLoading = ref(false);
+
+                // Images state
+                const images = ref([]);
+                const imagesLoading = ref(false);
+                const imagesError = ref(null);
+                const searchQuery = ref('');
+                const expandedRepos = ref([]);
+
+                // Toast state
+                const toast = ref('');
+
+                // Computed
+                const filteredImages = computed(() => {
+                    if (!searchQuery.value) return images.value;
+                    const query = searchQuery.value.toLowerCase();
+                    return images.value.filter(img =>
+                        img.repoName.toLowerCase().includes(query) ||
+                        img.tags.some(t => t.tag.toLowerCase().includes(query))
+                    );
+                });
+
+                // Methods
+                async function submitImage() {
+                    if (!imageInput.value.trim()) return;
+
+                    isSubmitting.value = true;
+                    submitResult.value = null;
+
+                    try {
+                        const response = await axios.post('/api/submit-image', {
+                            image: imageInput.value.trim(),
+                            platform: platform.value || undefined
+                        });
+                        submitResult.value = response.data;
+                        if (response.data.success) {
+                            imageInput.value = '';
+                            platform.value = '';
+                            // Refresh workflow status after a short delay
+                            setTimeout(fetchWorkflowStatus, 2000);
+                        }
+                    } catch (err) {
+                        submitResult.value = {
+                            success: false,
+                            message: err.response?.data?.message || '提交失败，请重试'
+                        };
+                    } finally {
+                        isSubmitting.value = false;
+                    }
+                }
+
+                async function fetchWorkflowStatus() {
+                    workflowLoading.value = true;
+                    try {
+                        const response = await axios.get('/api/workflow-status');
+                        workflows.value = response.data.workflows || [];
+                    } catch (err) {
+                        console.error('Failed to fetch workflow status:', err);
+                    } finally {
+                        workflowLoading.value = false;
+                    }
+                }
+
+                async function fetchImages() {
+                    imagesLoading.value = true;
+                    imagesError.value = null;
+                    try {
+                        const response = await axios.get('/api/images');
+                        if (response.data.success === false && response.data.error) {
+                            // API not available
+                            imagesError.value = response.data;
+                            images.value = [];
+                        } else {
+                            images.value = response.data.images || [];
+                            // Auto-expand first repo if only one
+                            if (images.value.length === 1) {
+                                expandedRepos.value = [images.value[0].repoId];
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Failed to fetch images:', err);
+                    } finally {
+                        imagesLoading.value = false;
+                    }
+                }
+
+                function toggleExpand(repoId) {
+                    const idx = expandedRepos.value.indexOf(repoId);
+                    if (idx > -1) {
+                        expandedRepos.value.splice(idx, 1);
+                    } else {
+                        expandedRepos.value.push(repoId);
+                    }
+                }
+
+                function copyCommand(cmd) {
+                    navigator.clipboard.writeText(cmd).then(() => {
+                        showToast('已复制到剪贴板');
+                    }).catch(() => {
+                        showToast('复制失败');
+                    });
+                }
+
+                function showToast(msg) {
+                    toast.value = msg;
+                    setTimeout(() => { toast.value = ''; }, 2000);
+                }
+
+                function getStatusColor(status, conclusion) {
+                    if (status === 'completed') {
+                        if (conclusion === 'success') return 'bg-green-500';
+                        if (conclusion === 'failure') return 'bg-red-500';
+                        return 'bg-gray-500';
+                    }
+                    if (status === 'in_progress') return 'bg-blue-500 animate-pulse';
+                    return 'bg-yellow-500';
+                }
+
+                function getStatusBadgeClass(status, conclusion) {
+                    if (status === 'completed') {
+                        if (conclusion === 'success') return 'bg-green-100 text-green-800';
+                        if (conclusion === 'failure') return 'bg-red-100 text-red-800';
+                        return 'bg-gray-100 text-gray-800';
+                    }
+                    if (status === 'in_progress') return 'bg-blue-100 text-blue-800';
+                    return 'bg-yellow-100 text-yellow-800';
+                }
+
+                function getStatusText(status, conclusion) {
+                    if (status === 'completed') {
+                        if (conclusion === 'success') return '成功';
+                        if (conclusion === 'failure') return '失败';
+                        if (conclusion === 'cancelled') return '已取消';
+                        return conclusion || '已完成';
+                    }
+                    if (status === 'in_progress') return '执行中';
+                    if (status === 'queued') return '排队中';
+                    return status;
+                }
+
+                function formatTime(isoString) {
+                    if (!isoString) return '';
+                    const date = new Date(isoString);
+                    return date.toLocaleString('zh-CN');
+                }
+
+                function formatSize(bytes) {
+                    if (!bytes) return '';
+                    const units = ['B', 'KB', 'MB', 'GB'];
+                    let i = 0;
+                    while (bytes >= 1024 && i < units.length - 1) {
+                        bytes /= 1024;
+                        i++;
+                    }
+                    return bytes.toFixed(1) + ' ' + units[i];
+                }
+
+                // Lifecycle
+                onMounted(() => {
+                    fetchWorkflowStatus();
+                    fetchImages();
+                    // Poll workflow status every 15 seconds
+                    setInterval(fetchWorkflowStatus, 15000);
+                });
+
+                return {
+                    imageInput,
+                    platform,
+                    isSubmitting,
+                    submitResult,
+                    workflows,
+                    workflowLoading,
+                    images,
+                    imagesLoading,
+                    imagesError,
+                    searchQuery,
+                    expandedRepos,
+                    filteredImages,
+                    toast,
+                    submitImage,
+                    fetchWorkflowStatus,
+                    fetchImages,
+                    toggleExpand,
+                    copyCommand,
+                    getStatusColor,
+                    getStatusBadgeClass,
+                    getStatusText,
+                    formatTime,
+                    formatSize
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
