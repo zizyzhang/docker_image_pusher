@@ -1,1 +1,1 @@
-pzs-probe-nonexist:tag
+hello-world:latest
